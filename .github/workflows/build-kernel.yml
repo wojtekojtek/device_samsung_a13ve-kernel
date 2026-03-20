@@ -1,0 +1,118 @@
+name: Build kernel
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      kernel_repo:
+        description: 'Kernel repository URL'
+        required: false
+        default: 'https://github.com/wojtekojtek/android_kernel_samsung_a13ve_1'
+      kernel_branch:
+        description: 'Kernel branch'
+        required: false
+        default: 'main'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup build environment
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev device-tree-compiler python3
+        if [ ! -f /usr/bin/python2 ]; then
+          sudo ln -sf /usr/bin/python3 /usr/bin/python2
+        fi
+
+    - name: Setup mkdtimg
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/dabao1955/kernel_build_action/main/mkdtboimg.py -o /tmp/mkdtboimg.py
+        sudo cp /tmp/mkdtboimg.py /usr/local/bin/mkdtimg
+        sudo chmod +x /usr/local/bin/mkdtimg
+
+    - name: Clone kernel source
+      run: |
+        rm -rf $GITHUB_WORKSPACE/kernel/samsung/a13ve
+        git clone --branch ${{ github.event.inputs.kernel_branch || 'main' }} ${{ github.event.inputs.kernel_repo || 'https://github.com/wojtekojtek/android_kernel_samsung_a13ve_1' }} $GITHUB_WORKSPACE/kernel/samsung/a13ve
+
+    - name: Verify toolchain
+      run: |
+        KDIR=$GITHUB_WORKSPACE/kernel/samsung/a13ve
+        echo "=== Clang ==="
+        $KDIR/toolchain/clang/host/linux-x86/clang-r383902/bin/clang --version
+        echo "=== GCC ==="
+        $KDIR/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-gcc --version
+
+    - name: Patch DTB Makefile
+      run: |
+        cat > $GITHUB_WORKSPACE/kernel/samsung/a13ve/arch/arm64/boot/dts/mediatek/Makefile << 'EOF'
+        # SPDX-License-Identifier: GPL-2.0
+        dtb-y += mt6768.dtb
+        dtb-y += a13ve/a13ve_eur_open_w00_r00.dtb
+
+        always := $(dtb-y)
+        subdir-y := $(dts-dirs)
+        clean-files := *.dtb*
+        EOF
+
+    - name: Build kernel
+      run: |
+        set -e
+        KDIR=$GITHUB_WORKSPACE/kernel/samsung/a13ve
+        OUT=$KDIR/out
+
+        export CROSS_COMPILE=$KDIR/toolchain/toolchains-gcc-10.3.0/bin/aarch64-buildroot-linux-gnu-
+        export CC=$KDIR/toolchain/clang/host/linux-x86/clang-r383902/bin/clang
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export ARCH=arm64
+        export KCFLAGS=-w
+        export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+        export CONFIG_DRV_BUILD_IN=Y
+
+        mkdir -p $OUT
+
+        make -C $KDIR O=$OUT KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y a13ve_defconfig
+        make -C $KDIR O=$OUT KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y -j$(nproc) Image.gz dtbs modules
+
+    - name: Package output files
+      run: |
+        set -e
+        KDIR=$GITHUB_WORKSPACE/kernel/samsung/a13ve
+        OUT=$KDIR/out
+
+        cp $OUT/arch/arm64/boot/Image.gz $KDIR/arch/arm64/boot/Image
+
+        cat $OUT/arch/arm64/boot/Image.gz $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb > $KDIR/Image.gz-dtb
+
+        if [ -f $OUT/arch/arm64/boot/dts/mediatek/a13ve/a13ve_eur_open_w00_r00.dtb ]; then
+          mkdtimg create $KDIR/dtbo.img $OUT/arch/arm64/boot/dts/mediatek/a13ve/a13ve_eur_open_w00_r00.dtb
+        else
+          echo "WARNING: a13ve dtb not found, skipping dtbo.img"
+        fi
+
+        find $OUT -name "*.ko" -exec cp {} $KDIR/ \;
+
+    - name: Collect prebuilts
+      run: |
+        KDIR=$GITHUB_WORKSPACE/kernel/samsung/a13ve
+        OUT=$KDIR/out
+        PREBUILTS=$GITHUB_WORKSPACE/prebuilts_out
+
+        mkdir -p $PREBUILTS/dtb
+        mkdir -p $PREBUILTS/vendor-modules
+
+        cp $KDIR/Image.gz-dtb $PREBUILTS/
+        [ -f $KDIR/dtbo.img ] && cp $KDIR/dtbo.img $PREBUILTS/
+        cp $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb $PREBUILTS/dtb/01_dtbdump_MT6768.dtb
+        find $OUT -name "*.ko" -exec cp {} $PREBUILTS/vendor-modules/ \;
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-prebuilts
+        path: prebuilts_out/
