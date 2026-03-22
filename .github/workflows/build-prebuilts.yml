@@ -1,4 +1,4 @@
-name: Build kernel
+name: Build prebuilts
 on:
   push:
     branches: [ main, master ]
@@ -97,68 +97,22 @@ jobs:
 
         find $OUT -name "*.ko" -exec cp {} $KDIR/ \;
 
-    - name: Clone AnyKernel3
-      run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3 $GITHUB_WORKSPACE/AnyKernel3
-        rm -rf $GITHUB_WORKSPACE/AnyKernel3/.git
-
-    - name: Package AnyKernel3 zip
+    - name: Collect prebuilts
       run: |
         KDIR=$GITHUB_WORKSPACE/kernel/samsung/a13ve
-        AK3=$GITHUB_WORKSPACE/AnyKernel3
+        OUT=$KDIR/out
+        PREBUILTS=$GITHUB_WORKSPACE/prebuilts_out
 
-        cp $KDIR/Image.gz-dtb $AK3/
-        [ -f $KDIR/dtbo.img ] && cp $KDIR/dtbo.img $AK3/
+        mkdir -p $PREBUILTS/dtb
+        mkdir -p $PREBUILTS/vendor-modules
 
-        cat > $AK3/anykernel.sh << 'EOF'
-        ## AnyKernel3 Ramdisk Mod Script
-        ## osm0sis @ xda-developers
-        ### AnyKernel setup
-        # global properties
-        properties() { '
-        kernel.string=Samsung Galaxy A13 Mediatek Kernel by wojtekojtek
-        do.devicecheck=1
-        do.modules=0
-        do.systemless=1
-        do.cleanup=1
-        do.cleanuponabort=0
-        device.name1=a13ve
-        device.name2=A137F
-        device.name3=SM-A137F
-        device.name4=a13
-        device.name5=a137f
-        supported.versions=
-        supported.patchlevels=
-        supported.vendorpatchlevels=
-        '; } # end properties
+        cp $KDIR/Image.gz-dtb $PREBUILTS/
+        [ -f $KDIR/dtbo.img ] && cp $KDIR/dtbo.img $PREBUILTS/
+        cp $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb $PREBUILTS/dtb/01_dtbdump_MT6768.dtb
+        find $OUT -name "*.ko" -exec cp {} $PREBUILTS/vendor-modules/ \;
 
-        ### AnyKernel install
-        ## boot files attributes
-        boot_attributes() {
-        set_perm_recursive 0 0 755 644 $RAMDISK/*;
-        set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
-        } # end attributes
-
-        # boot shell variables
-        BLOCK=boot;
-        IS_SLOT_DEVICE=0;
-        RAMDISK_COMPRESSION=auto;
-        PATCH_VBMETA_FLAG=auto;
-
-        # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
-        . tools/ak3-core.sh;
-
-        # boot install
-        split_boot; # skip ramdisk unpack, just flash kernel + dtb
-        flash_boot;
-        ## end boot install
-        EOF
-
-        cd $AK3
-        zip -r9 $GITHUB_WORKSPACE/kernel-a13ve-$(date +%Y%m%d-%H%M).zip . -x '*.git*' '*.github*'
-
-    - name: Upload flashable zip
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-a13ve-flashable
-        path: ${{ github.workspace }}/kernel-a13ve-*.zip
+        name: kernel-prebuilts
+        path: prebuilts_out/
