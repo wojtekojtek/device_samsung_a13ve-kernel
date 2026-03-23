@@ -85,31 +85,34 @@ jobs:
         KDIR=$GITHUB_WORKSPACE/kernel/samsung/a13ve
         OUT=$KDIR/out
 
-        cp $OUT/arch/arm64/boot/Image.gz $KDIR/arch/arm64/boot/Image
-
-        cat $OUT/arch/arm64/boot/Image.gz $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb > $KDIR/Image.gz-dtb
-
         if [ -f $OUT/arch/arm64/boot/dts/mediatek/a13ve/a13ve_eur_open_w00_r00.dtb ]; then
           mkdtimg create $KDIR/dtbo.img $OUT/arch/arm64/boot/dts/mediatek/a13ve/a13ve_eur_open_w00_r00.dtb
         else
-          echo "WARNING: a13ve dtb not found, skipping dtbo.img"
+          echo "ERROR: a13ve dtb not found" && exit 1
+        fi
+
+        if [ ! -f $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb ]; then
+          echo "ERROR: mt6768.dtb not found" && exit 1
         fi
 
         find $OUT -name "*.ko" -exec cp {} $KDIR/ \;
 
     - name: Collect prebuilts
       run: |
+        set -e
         KDIR=$GITHUB_WORKSPACE/kernel/samsung/a13ve
         OUT=$KDIR/out
         PREBUILTS=$GITHUB_WORKSPACE/prebuilts_out
 
-        mkdir -p $PREBUILTS/dtb
         mkdir -p $PREBUILTS/vendor-modules
 
-        cp $KDIR/Image.gz-dtb $PREBUILTS/
-        [ -f $KDIR/dtbo.img ] && cp $KDIR/dtbo.img $PREBUILTS/
-        cp $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb $PREBUILTS/dtb/01_dtbdump_MT6768.dtb
+        cp $OUT/arch/arm64/boot/Image.gz                              $PREBUILTS/Image.gz
+        cp $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb               $PREBUILTS/dtb.img
+        cp $KDIR/dtbo.img                                              $PREBUILTS/dtbo.img
         find $OUT -name "*.ko" -exec cp {} $PREBUILTS/vendor-modules/ \;
+
+        echo "=== Prebuilts ==="
+        ls -lh $PREBUILTS/
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
