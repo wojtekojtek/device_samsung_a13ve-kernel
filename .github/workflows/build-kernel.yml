@@ -73,6 +73,7 @@ jobs:
         export KCFLAGS=-w
         export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
         export CONFIG_DRV_BUILD_IN=Y
+        export TARGET_BUILD_VARIANT=eng
 
         mkdir -p $OUT
 
