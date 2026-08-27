@@ -1,7 +1,5 @@
 name: Build prebuilts
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       kernel_repo:
@@ -16,6 +14,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout
@@ -106,13 +107,37 @@ jobs:
 
         mkdir -p $PREBUILTS/vendor-modules
 
-        cp $OUT/arch/arm64/boot/Image.gz                              $PREBUILTS/Image.gz
-        cp $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb               $PREBUILTS/dtb.img
-        cp $KDIR/dtbo.img                                              $PREBUILTS/dtbo.img
+        cp $OUT/arch/arm64/boot/Image.gz $PREBUILTS/Image.gz
+        cp $OUT/arch/arm64/boot/dts/mediatek/mt6768.dtb $PREBUILTS/dtb.img
+        cp $KDIR/dtbo.img $PREBUILTS/dtbo.img
         find $OUT -name "*.ko" -exec cp {} $PREBUILTS/vendor-modules/ \;
 
-        echo "=== Prebuilts ==="
         ls -lh $PREBUILTS/
+
+    - name: Update prebuilts in repository
+      run: |
+        set -e
+        rm -rf vendor-modules
+
+        cp prebuilts_out/Image.gz .
+        cp prebuilts_out/dtb.img .
+        cp prebuilts_out/dtbo.img .
+        cp -r prebuilts_out/vendor-modules .
+        
+        git status --short
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        git add Image.gz dtb.img dtbo.img vendor-modules/
+
+        if git diff --cached --quiet; then
+          echo "No changes to commit."
+          exit 1
+        fi
+
+        git commit -m "Update kernel prebuilts"
+        git push
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
